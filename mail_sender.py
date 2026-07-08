@@ -65,6 +65,12 @@ class NotificationManager:
         if not MAIL_FROM_EMAIL:
             raise ValueError("Missing MAIL_FROM_EMAIL for Resend delivery.")
 
+        print(f"[DEBUG] Sending email via Resend")
+        print(f"[DEBUG] From: {MAIL_FROM_EMAIL}")
+        print(f"[DEBUG] To: {to_addr}")
+        print(f"[DEBUG] API Key length: {len(RESEND_API_KEY)}")
+        print(f"[DEBUG] API Key starts with: {RESEND_API_KEY[:10]}...")
+
         payload = json.dumps(
             {
                 "from": MAIL_FROM_EMAIL,
@@ -84,9 +90,15 @@ class NotificationManager:
             method="POST",
         )
 
-        with urllib.request.urlopen(request, timeout=SMTP_TIMEOUT) as response:
-            if response.status not in (200, 201):
-                raise RuntimeError(f"Resend API returned status {response.status}")
+        try:
+            with urllib.request.urlopen(request, timeout=SMTP_TIMEOUT) as response:
+                if response.status not in (200, 201):
+                    raise RuntimeError(f"Resend API returned status {response.status}")
+                print(f"[DEBUG] Email sent successfully! Status: {response.status}")
+        except urllib.error.HTTPError as e:
+            print(f"[DEBUG] HTTP Error {e.code}: {e.reason}")
+            print(f"[DEBUG] Response: {e.read().decode()}")
+            raise
 
     def _open_connection(self):
         if SMTP_SECURITY == "ssl":
@@ -108,6 +120,7 @@ class NotificationManager:
         owner_email = MAIL_TO_EMAIL
 
         print(f"userEmail: {userEmail}")
+        print(f"[DEBUG] MAIL_DELIVERY_METHOD: {MAIL_DELIVERY_METHOD}")
 
         user_subject = "dileandrog-development .:: WELLCOME TO MY-RESUME!"
         owner_subject = "dileandrog-development .:: You Have a new user!!"
