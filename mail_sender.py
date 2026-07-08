@@ -1,8 +1,12 @@
 
 import os
+import json
 from pathlib import Path
 from dotenv import load_dotenv
 import smtplib
+import socket
+import urllib.request
+import urllib.error
 
 
 ENV_FILE = Path(__file__).resolve().parent / ".env"
@@ -13,9 +17,92 @@ MY_PASSWORD = os.environ.get("MY_PASSWORD")
 SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
 SMTP_TIMEOUT = int(os.environ.get("SMTP_TIMEOUT", "15"))
+SMTP_SECURITY = os.environ.get("SMTP_SECURITY", "starttls").lower()
+MAIL_DELIVERY_METHOD = os.environ.get("MAIL_DELIVERY_METHOD", "smtp").lower()
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY")
+MAIL_FROM_EMAIL = os.environ.get("MAIL_FROM_EMAIL") or MY_EMAIL
+
+
+def create_smtp_socket(host, port, timeout):
+    addresses = socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)
+    addresses.sort(key=lambda item: 0 if item[0] == socket.AF_INET else 1)
+
+    last_error = None
+    for family, socktype, proto, _, sockaddr in addresses:
+        smtp_socket = None
+        try:
+            smtp_socket = socket.socket(family, socktype, proto)
+            smtp_socket.settimeout(timeout)
+            smtp_socket.connect(sockaddr)
+            return smtp_socket
+        except OSError as exc:
+            last_error = exc
+            if smtp_socket is not None:
+                smtp_socket.close()
+
+    if last_error is None:
+        raise OSError(f"Unable to resolve SMTP host: {host}")
+
+    raise last_error
+
+
+class IPv4PreferredSMTP(smtplib.SMTP):
+    def _get_socket(self, host, port, timeout):
+        if timeout is not None and not timeout:
+            raise ValueError("Non-blocking socket (timeout=0) is not supported")
+        return create_smtp_socket(host, port, timeout)
+
+
+class IPv4PreferredSMTP_SSL(smtplib.SMTP_SSL):
+    def _get_socket(self, host, port, timeout):
+        if timeout is not None and not timeout:
+            raise ValueError("Non-blocking socket (timeout=0) is not supported")
+        raw_socket = create_smtp_socket(host, port, timeout)
+        return self.context.wrap_socket(raw_socket, server_hostname=host)
 
 
 class NotificationManager:
+    def _send_with_resend(self, to_addr, subject, body):
+        if not RESEND_API_KEY:
+            raise ValueError("Missing RESEND_API_KEY for Resend delivery.")
+        if not MAIL_FROM_EMAIL:
+            raise ValueError("Missing MAIL_FROM_EMAIL for Resend delivery.")
+
+        payload = json.dumps(
+            {
+                "from": MAIL_FROM_EMAIL,
+                "to": [to_addr],
+                "subject": subject,
+                "text": body,
+            }
+        ).encode("utf-8")
+
+        request = urllib.request.Request(
+            "https://api.resend.com/emails",
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {RESEND_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+
+        with urllib.request.urlopen(request, timeout=SMTP_TIMEOUT) as response:
+            if response.status not in (200, 201):
+                raise RuntimeError(f"Resend API returned status {response.status}")
+
+    def _open_connection(self):
+        if SMTP_SECURITY == "ssl":
+            return IPv4PreferredSMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=SMTP_TIMEOUT)
+
+        connection = IPv4PreferredSMTP(SMTP_HOST, SMTP_PORT, timeout=SMTP_TIMEOUT)
+        connection.ehlo()
+
+        if SMTP_SECURITY == "starttls":
+            connection.starttls()
+            connection.ehlo()
+
+        return connection
 
     def send_emails(self, msg_content, my_msg_content, userEmail):
 
@@ -26,26 +113,37 @@ class NotificationManager:
 
         print(f"userEmail: {userEmail}")
 
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=SMTP_TIMEOUT) as connection:
-            connection.ehlo()
-            connection.starttls()
-            connection.ehlo()
-            connection.login(my_email, password)
-            try:
+        user_subject = "dileandrog-development .:: WELLCOME TO MY-RESUME!"
+        owner_subject = "dileandrog-development .:: You Have a new user!!"
+
+        if MAIL_DELIVERY_METHOD == "resend":
+            self._send_with_resend(userEmail, user_subject, msg_content)
+            self._send_with_resend(my_email, owner_subject, my_msg_content)
+            return
+
+        try:
+            with self._open_connection() as connection:
+                connection.login(my_email, password)
                 connection.sendmail(
                     from_addr=my_email,
                     to_addrs=userEmail,
-                    msg=f"Subject:dileandrog-development .:: WELLCOME TO MY-RESUME!\n\n{msg_content}\n".encode('utf-8'))
+                    msg=f"Subject:{user_subject}\n\n{msg_content}\n".encode('utf-8'))
                 print(f"msg content: {msg_content} \n")
                 print("\n\nMessage sent successfully!")
 
                 connection.sendmail(
                     from_addr=my_email,
                     to_addrs=my_email,
-                    msg=f"Subject:dileandrog-development .:: You Have a new user!!\n\n{my_msg_content}\n".encode(
-                        'utf-8'))
+                    msg=f"Subject:{owner_subject}\n\n{my_msg_content}\n".encode('utf-8'))
                 print(f"msg content: {my_msg_content} \n")
                 print("\n\nMessage sent successfully!")
-            except UnicodeError as msg:
-                print(f"-- ERROR: send_to could not be sent: {msg}")
+        except (OSError, smtplib.SMTPException) as exc:
+            if RESEND_API_KEY:
+                self._send_with_resend(userEmail, user_subject, msg_content)
+                self._send_with_resend(my_email, owner_subject, my_msg_content)
+                return
+            raise RuntimeError(
+                "Mail delivery failed over SMTP. Configure RESEND_API_KEY and MAIL_FROM_EMAIL "
+                "to send mail over HTTPS, or verify outbound SMTP/TLS access on the host."
+            ) from exc
 

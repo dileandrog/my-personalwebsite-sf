@@ -69,7 +69,7 @@ def contact_form():
 
     except Exception as e:
         print(e)
-        return render_template("404.html", message=e)
+        return render_template("404.html", message=e), 500
 
 
 
