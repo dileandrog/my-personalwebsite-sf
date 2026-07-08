@@ -1,14 +1,18 @@
 
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 import smtplib
 
 
-ENV_FILE= ".env"
-load_dotenv(f"{os.getcwd()}/{ENV_FILE}")
+ENV_FILE = Path(__file__).resolve().parent / ".env"
+load_dotenv(ENV_FILE)
 
 MY_EMAIL = os.environ.get("MY_EMAIL")
 MY_PASSWORD = os.environ.get("MY_PASSWORD")
+SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
+SMTP_TIMEOUT = int(os.environ.get("SMTP_TIMEOUT", "15"))
 
 
 class NotificationManager:
@@ -17,12 +21,15 @@ class NotificationManager:
 
         my_email = MY_EMAIL
         password = MY_PASSWORD
-        smtp_address = "smtp.gmail.com"
+        if not my_email or not password:
+            raise ValueError("Missing MY_EMAIL or MY_PASSWORD environment variables.")
 
         print(f"userEmail: {userEmail}")
 
-        with smtplib.SMTP(smtp_address) as connection:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=SMTP_TIMEOUT) as connection:
+            connection.ehlo()
             connection.starttls()
+            connection.ehlo()
             connection.login(my_email, password)
             try:
                 connection.sendmail(

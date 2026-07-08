@@ -25,7 +25,7 @@ def myContacts():
     return render_template("my-contacts.html")
 
 
-@app.route('/my-contacts.html"', methods=['POST'])
+@app.route('/my-contacts.html', methods=['POST'])
 def contact_form():
     try:
         userEmail = request.form['userEmail']
