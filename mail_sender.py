@@ -21,6 +21,7 @@ SMTP_SECURITY = os.environ.get("SMTP_SECURITY", "starttls").lower()
 MAIL_DELIVERY_METHOD = os.environ.get("MAIL_DELIVERY_METHOD", "smtp").lower()
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY")
 MAIL_FROM_EMAIL = os.environ.get("MAIL_FROM_EMAIL") or MY_EMAIL
+MAIL_TO_EMAIL = os.environ.get("MAIL_TO_EMAIL") or MY_EMAIL
 
 
 def create_smtp_socket(host, port, timeout):
@@ -108,8 +109,7 @@ class NotificationManager:
 
         my_email = MY_EMAIL
         password = MY_PASSWORD
-        if not my_email or not password:
-            raise ValueError("Missing MY_EMAIL or MY_PASSWORD environment variables.")
+        owner_email = MAIL_TO_EMAIL
 
         print(f"userEmail: {userEmail}")
 
@@ -117,9 +117,14 @@ class NotificationManager:
         owner_subject = "dileandrog-development .:: You Have a new user!!"
 
         if MAIL_DELIVERY_METHOD == "resend":
+            if not owner_email:
+                raise ValueError("Missing MAIL_TO_EMAIL or MY_EMAIL for Resend delivery.")
             self._send_with_resend(userEmail, user_subject, msg_content)
-            self._send_with_resend(my_email, owner_subject, my_msg_content)
+            self._send_with_resend(owner_email, owner_subject, my_msg_content)
             return
+
+        if not my_email or not password:
+            raise ValueError("Missing MY_EMAIL or MY_PASSWORD environment variables.")
 
         try:
             with self._open_connection() as connection:
@@ -133,14 +138,16 @@ class NotificationManager:
 
                 connection.sendmail(
                     from_addr=my_email,
-                    to_addrs=my_email,
+                    to_addrs=owner_email,
                     msg=f"Subject:{owner_subject}\n\n{my_msg_content}\n".encode('utf-8'))
                 print(f"msg content: {my_msg_content} \n")
                 print("\n\nMessage sent successfully!")
         except (OSError, smtplib.SMTPException) as exc:
             if RESEND_API_KEY:
+                if not owner_email:
+                    raise ValueError("Missing MAIL_TO_EMAIL or MY_EMAIL for Resend fallback delivery.") from exc
                 self._send_with_resend(userEmail, user_subject, msg_content)
-                self._send_with_resend(my_email, owner_subject, my_msg_content)
+                self._send_with_resend(owner_email, owner_subject, my_msg_content)
                 return
             raise RuntimeError(
                 "Mail delivery failed over SMTP. Configure RESEND_API_KEY and MAIL_FROM_EMAIL "
