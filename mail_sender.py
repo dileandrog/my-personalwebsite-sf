@@ -23,8 +23,8 @@ if raw_method not in {"smtp", "resend"}:
     raw_method = "smtp"
 MAIL_DELIVERY_METHOD = raw_method
 
-MAIL_FROM_EMAIL = os.environ.get("MAIL_FROM_EMAIL") or MY_EMAIL
-MAIL_TO_EMAIL = os.environ.get("MAIL_TO_EMAIL") or MY_EMAIL
+MAIL_FROM_EMAIL = ((os.environ.get("MAIL_FROM_EMAIL") or MY_EMAIL) or "").strip().strip('"\'')
+MAIL_TO_EMAIL = ((os.environ.get("MAIL_TO_EMAIL") or MY_EMAIL) or "").strip().strip('"\'')
 
 
 def create_smtp_socket(host, port, timeout):
@@ -91,9 +91,20 @@ class NotificationManager:
             method="POST",
         )
 
-        with urllib.request.urlopen(request, timeout=SMTP_TIMEOUT) as response:
-            if response.status not in (200, 201):
-                raise RuntimeError(f"Resend API returned status {response.status}")
+        try:
+            with urllib.request.urlopen(request, timeout=SMTP_TIMEOUT) as response:
+                if response.status not in (200, 201):
+                    raise RuntimeError(f"Resend API returned status {response.status}")
+        except urllib.error.HTTPError as exc:
+            try:
+                response_body = exc.read().decode("utf-8", errors="replace")
+            except Exception:
+                response_body = "<unable to parse response body>"
+            raise RuntimeError(
+                f"Resend HTTPError {exc.code}: {response_body}"
+            ) from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"Resend URLError: {exc}") from exc
 
     def _open_connection(self):
         if SMTP_SECURITY == "ssl":
@@ -113,8 +124,12 @@ class NotificationManager:
         my_email = MY_EMAIL
         password = MY_PASSWORD
         owner_email = MAIL_TO_EMAIL
+        user_email_clean = (userEmail or "").strip().strip('"\'')
 
-        print(f"userEmail: {userEmail}")
+        print(f"MAIL_DELIVERY_METHOD: {MAIL_DELIVERY_METHOD}")
+        print(f"MAIL_FROM_EMAIL: {MAIL_FROM_EMAIL}")
+        print(f"MAIL_TO_EMAIL: {owner_email}")
+        print(f"userEmail: {user_email_clean}")
 
         user_subject = "dileandrog-development .:: WELLCOME TO MY-RESUME!"
         owner_subject = "dileandrog-development .:: You Have a new user!!"
@@ -122,7 +137,7 @@ class NotificationManager:
         if MAIL_DELIVERY_METHOD == "resend":
             if not owner_email:
                 raise ValueError("Missing MAIL_TO_EMAIL or MY_EMAIL for Resend delivery.")
-            self._send_with_resend(userEmail, user_subject, msg_content)
+            self._send_with_resend(user_email_clean, user_subject, msg_content)
             self._send_with_resend(owner_email, owner_subject, my_msg_content)
             return
 
@@ -134,7 +149,7 @@ class NotificationManager:
                 connection.login(my_email, password)
                 connection.sendmail(
                     from_addr=my_email,
-                    to_addrs=userEmail,
+                    to_addrs=user_email_clean,
                     msg=f"Subject:{user_subject}\n\n{msg_content}\n".encode('utf-8'))
                 print(f"msg content: {msg_content} \n")
                 print("\n\nMessage sent successfully!")
@@ -149,7 +164,7 @@ class NotificationManager:
             if RESEND_API_KEY:
                 if not owner_email:
                     raise ValueError("Missing MAIL_TO_EMAIL or MY_EMAIL for Resend fallback delivery.") from exc
-                self._send_with_resend(userEmail, user_subject, msg_content)
+                self._send_with_resend(user_email_clean, user_subject, msg_content)
                 self._send_with_resend(owner_email, owner_subject, my_msg_content)
                 return
             raise RuntimeError(
