@@ -14,8 +14,15 @@ SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
 SMTP_TIMEOUT = int(os.environ.get("SMTP_TIMEOUT", "15"))
 SMTP_SECURITY = os.environ.get("SMTP_SECURITY", "starttls").lower()
-MAIL_DELIVERY_METHOD = os.environ.get("MAIL_DELIVERY_METHOD", "smtp").lower()
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY")
+
+raw_method = (os.environ.get("MAIL_DELIVERY_METHOD") or "").strip().strip('"\'').lower()
+if not raw_method:
+    raw_method = "resend" if RESEND_API_KEY else "smtp"
+if raw_method not in {"smtp", "resend"}:
+    raw_method = "smtp"
+MAIL_DELIVERY_METHOD = raw_method
+
 MAIL_FROM_EMAIL = os.environ.get("MAIL_FROM_EMAIL") or MY_EMAIL
 MAIL_TO_EMAIL = os.environ.get("MAIL_TO_EMAIL") or MY_EMAIL
 
