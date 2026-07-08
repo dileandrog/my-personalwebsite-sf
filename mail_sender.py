@@ -2,15 +2,11 @@
 import os
 import json
 from pathlib import Path
-from dotenv import load_dotenv
 import smtplib
 import socket
 import urllib.request
 import urllib.error
 
-
-ENV_FILE = Path(__file__).resolve().parent / ".env"
-load_dotenv(ENV_FILE)
 
 MY_EMAIL = os.environ.get("MY_EMAIL")
 MY_PASSWORD = os.environ.get("MY_PASSWORD")
