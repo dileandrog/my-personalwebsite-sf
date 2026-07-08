@@ -1,7 +1,6 @@
 
 import os
 import json
-from pathlib import Path
 import smtplib
 import socket
 import urllib.request
@@ -14,6 +13,7 @@ SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
 SMTP_TIMEOUT = int(os.environ.get("SMTP_TIMEOUT", "15"))
 SMTP_SECURITY = os.environ.get("SMTP_SECURITY", "starttls").lower()
+SMTP_SSL_FALLBACK = (os.environ.get("SMTP_SSL_FALLBACK", "true").strip().lower() == "true")
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY")
 
 raw_method = (os.environ.get("MAIL_DELIVERY_METHOD") or "").strip().strip('"\'').lower()
@@ -114,8 +114,18 @@ class NotificationManager:
         connection.ehlo()
 
         if SMTP_SECURITY == "starttls":
-            connection.starttls()
-            connection.ehlo()
+            try:
+                connection.starttls()
+                connection.ehlo()
+            except (OSError, smtplib.SMTPException):
+                connection.close()
+                if not SMTP_SSL_FALLBACK:
+                    raise
+
+                # Some hosts reset STARTTLS negotiation; retrying over SSL:465 can be more stable.
+                ssl_connection = IPv4PreferredSMTP_SSL(SMTP_HOST, 465, timeout=SMTP_TIMEOUT)
+                ssl_connection.ehlo()
+                return ssl_connection
 
         return connection
 
@@ -130,6 +140,8 @@ class NotificationManager:
         print(f"MAIL_FROM_EMAIL: {MAIL_FROM_EMAIL}")
         print(f"MAIL_TO_EMAIL: {owner_email}")
         print(f"userEmail: {user_email_clean}")
+        print(f"SMTP_SECURITY: {SMTP_SECURITY}")
+        print(f"SMTP_SSL_FALLBACK: {SMTP_SSL_FALLBACK}")
 
         user_subject = "dileandrog-development .:: WELLCOME TO MY-RESUME!"
         owner_subject = "dileandrog-development .:: You Have a new user!!"
